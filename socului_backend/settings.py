@@ -37,6 +37,10 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'rest_framework',
+    'restaurant', # Add the restaurant app
+    'djoser',
+    'rest_framework_simplejwt',
 ]
 
 MIDDLEWARE = [
@@ -121,3 +125,24 @@ STATIC_URL = 'static/'
 # https://docs.djangoproject.com/en/5.1/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': (
+        'rest_framework_simplejwt.authentication.JWTAuthentication', # Use JWT Authentication globally for API
+    ),
+    'DEFAULT_PERMISSION_CLASSES': (
+        'rest_framework.permissions.IsAuthenticatedOrReadOnly', # Default permission: AllowAny read, IsAuthenticated for write
+    )
+}
+
+DJOSER = {
+    'PASSWORD_RESET_CONFIRM_URL': '#/password/reset/confirm/{uid}/{token}', # Frontend URL for password reset confirm
+    'USERNAME_RESET_CONFIRM_URL': '#/username/reset/confirm/{uid}/{token}', # Frontend URL for username reset confirm
+    'ACTIVATION_URL': '#/activate/{uid}/{token}', # Frontend URL for account activation (if using email verification)
+    'SEND_ACTIVATION_EMAIL': False, # Set to True if you want to use email verification during registration
+    # 'SERIALIZERS': {
+    #     'user_create': 'restaurant.serializers.UserSerializer', # Use our UserSerializer for registration
+    #     'user': 'restaurant.serializers.UserSerializer', # Use our UserSerializer for user details
+    #     'current_user': 'restaurant.serializers.UserSerializer', # Use our UserSerializer for current user details
+    # }
+}
