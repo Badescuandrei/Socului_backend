@@ -9,6 +9,9 @@ django-restframework = "*"
 djangorestframework = "*"
 djoser = "*"
 djangorestframework-simplejwt = "*"
+pillow = "*"
+djangorestframework-api-key = "*"
+requests = "*"
 
 [dev-packages]
 

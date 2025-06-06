@@ -1,12 +1,25 @@
 from django.shortcuts import render
 from rest_framework import viewsets, status
 from rest_framework.response import Response
+from rest_framework.views import APIView
 from .models import Cart, Category, MenuItem, Order, OrderItem
-from .serializers import CartItemSerializer, CategorySerializer, MenuItemSerializer, OrderSerializer
+from .serializers import CartItemSerializer, CategorySerializer, DirectOrderInputSerializer, GroupSerializer, MenuItemSerializer, OrderSerializer
 from rest_framework.permissions import IsAuthenticated, IsAdminUser, AllowAny
 from rest_framework.decorators import api_view, permission_classes, action
 from django.shortcuts import get_object_or_404
-from django.contrib.auth.models import User
+from django.contrib.auth.models import User, Group
+from .permissions import IsManager, IsDeliveryCrew # Import custom permission classes
+from django.contrib.auth.models import Group
+from decimal import Decimal
+from django.db import transaction
+from rest_framework_api_key.permissions import HasAPIKey
+
+# Create groups if they don't exist (run only once on app startup)
+def create_groups():
+    Group.objects.get_or_create(name='Manager')
+    Group.objects.get_or_create(name='Delivery crew')
+
+create_groups() # Call the function to ensure groups are created on app startup
 
 class CategoryViewSet(viewsets.ViewSet):
     """
@@ -15,10 +28,10 @@ class CategoryViewSet(viewsets.ViewSet):
     permission_classes_by_action = {
         'list': [AllowAny],
         'retrieve': [AllowAny],
-        'create': [IsAuthenticated, IsAdminUser], # Manager role (or admin)
-        'update': [IsAuthenticated, IsAdminUser], # Manager role (or admin)
-        'partial_update': [IsAuthenticated, IsAdminUser], # Manager role (or admin)
-        'destroy': [IsAuthenticated, IsAdminUser], # Manager role (or admin)
+        'create': [IsAuthenticated, IsManager], # Use IsManager instead of IsAdminUser
+        'update': [IsAuthenticated, IsManager], # Use IsManager instead of IsAdminUser
+        'partial_update': [IsAuthenticated, IsManager], # Use IsManager instead of IsAdminUser
+        'destroy': [IsAuthenticated, IsManager], # Use IsManager instead of IsAdminUser
     }
 
     def get_permissions(self):
@@ -34,7 +47,7 @@ class CategoryViewSet(viewsets.ViewSet):
         List all categories. Publicly accessible.
         """
         queryset = Category.objects.all()
-        serializer = CategorySerializer(queryset, many=True)
+        serializer = CategorySerializer(queryset, many=True, context={'request': request})
         return Response(serializer.data)
 
     def retrieve(self, request, pk=None):
@@ -43,14 +56,14 @@ class CategoryViewSet(viewsets.ViewSet):
         """
         queryset = Category.objects.all()
         category = get_object_or_404(queryset, pk=pk)
-        serializer = CategorySerializer(category)
+        serializer = CategorySerializer(category, context={'request': request})
         return Response(serializer.data)
 
     def create(self, request):
         """
         Create a new category. Managers only.
         """
-        serializer = CategorySerializer(data=request.data)
+        serializer = CategorySerializer(data=request.data, context={'request': request})
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -62,7 +75,7 @@ class CategoryViewSet(viewsets.ViewSet):
         """
         queryset = Category.objects.all()
         category = get_object_or_404(queryset, pk=pk)
-        serializer = CategorySerializer(category, data=request.data)
+        serializer = CategorySerializer(category, data=request.data, context={'request': request})
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data)
@@ -74,7 +87,7 @@ class CategoryViewSet(viewsets.ViewSet):
         """
         queryset = Category.objects.all()
         category = get_object_or_404(queryset, pk=pk)
-        serializer = CategorySerializer(category, data=request.data, partial=True) # partial=True for partial updates
+        serializer = CategorySerializer(category, data=request.data, partial=True, context={'request': request}) # partial=True for partial updates
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data)
@@ -95,12 +108,12 @@ class MenuItemViewSet(viewsets.ViewSet):
     ViewSet for viewing and editing MenuItems.
     """
     permission_classes_by_action = {
-        'list': [AllowAny],
+       'list': [AllowAny],
         'retrieve': [AllowAny],
-        'create': [IsAuthenticated, IsAdminUser], # Manager role (or admin)
-        'update': [IsAuthenticated, IsAdminUser], # Manager role (or admin)
-        'partial_update': [IsAuthenticated, IsAdminUser], # Manager role (or admin)
-        'destroy': [IsAuthenticated, IsAdminUser], # Manager role (or admin)
+        'create': [IsAuthenticated, IsManager], # Use IsManager instead of IsAdminUser
+        'update': [IsAuthenticated, IsManager], # Use IsManager instead of IsAdminUser
+        'partial_update': [IsAuthenticated, IsManager], # Use IsManager instead of IsAdminUser
+        'destroy': [IsAuthenticated, IsManager], # Use IsManager instead of IsAdminUser
     }
 
     def get_permissions(self):
@@ -130,7 +143,7 @@ class MenuItemViewSet(viewsets.ViewSet):
         if ordering:
             queryset = queryset.order_by(ordering)
 
-        serializer = MenuItemSerializer(queryset, many=True) # No pagination for now, add later if needed
+        serializer = MenuItemSerializer(queryset, many=True, context={'request': request}) # No pagination for now, add later if needed
         return Response(serializer.data)
 
 
@@ -140,14 +153,14 @@ class MenuItemViewSet(viewsets.ViewSet):
         """
         queryset = MenuItem.objects.select_related('category').all() # Optimize with select_related
         menuitem = get_object_or_404(queryset, pk=pk)
-        serializer = MenuItemSerializer(menuitem)
+        serializer = MenuItemSerializer(menuitem, context={'request': request})
         return Response(serializer.data)
 
     def create(self, request):
         """
         Create a new menu item. Managers only.
         """
-        serializer = MenuItemSerializer(data=request.data)
+        serializer = MenuItemSerializer(data=request.data, context={'request': request})
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -159,7 +172,7 @@ class MenuItemViewSet(viewsets.ViewSet):
         """
         queryset = MenuItem.objects.all()
         menuitem = get_object_or_404(queryset, pk=pk)
-        serializer = MenuItemSerializer(menuitem, data=request.data)
+        serializer = MenuItemSerializer(menuitem, data=request.data, context={'request': request})
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data)
@@ -171,7 +184,7 @@ class MenuItemViewSet(viewsets.ViewSet):
         """
         queryset = MenuItem.objects.all()
         menuitem = get_object_or_404(queryset, pk=pk)
-        serializer = MenuItemSerializer(menuitem, data=request.data, partial=True)
+        serializer = MenuItemSerializer(menuitem, data=request.data, partial=True, context={'request': request})
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data)
@@ -196,8 +209,8 @@ class CartViewSet(viewsets.ViewSet):
         """
         Retrieve the current user's cart items.
         """
-        cart_items = Cart.objects.filter(user=request.user) # Get cart items for current user
-        serializer = CartItemSerializer(cart_items, many=True)
+        cart_items = Cart.objects.filter(user=request.user).select_related('menuitem', 'menuitem__category') # Get cart items for current user
+        serializer = CartItemSerializer(cart_items, many=True, context={'request': request})
         return Response(serializer.data)
 
     def create(self, request):
@@ -231,11 +244,16 @@ class CartViewSet(viewsets.ViewSet):
         )
 
         # Update quantity and price
-        cart_item.quantity += quantity
+        if not created: # If item already existed, update quantity
+             cart_item.quantity += quantity
+        else: # If newly created, set quantity
+             cart_item.quantity = quantity
+
         cart_item.price = cart_item.unit_price * cart_item.quantity
         cart_item.save()
 
-        serializer = CartItemSerializer(cart_item)
+        # --- PASS CONTEXT TO CartItemSerializer ---
+        serializer = CartItemSerializer(cart_item, context={'request': request})
         return Response(serializer.data, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK) # 201 if created, 200 if updated
 
     def update(self, request, pk=None): # pk is not really used for cart update in this design, but included for ViewSet consistency
@@ -246,7 +264,7 @@ class CartViewSet(viewsets.ViewSet):
         menuitem_id = request.data.get('menuitem_id') # Or get pk from URL if you prefer
         quantity = request.data.get('quantity')
 
-        if not menuitem_id or not quantity:
+        if not quantity or not menuitem_id:
             return Response({"error": "Both menuitem_id and quantity are required."}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
@@ -271,7 +289,7 @@ class CartViewSet(viewsets.ViewSet):
         cart_item.price = cart_item.unit_price * cart_item.quantity
         cart_item.save()
 
-        serializer = CartItemSerializer(cart_item)
+        serializer = CartItemSerializer(cart_item, context={'request': request})
         return Response(serializer.data)
 
     def destroy(self, request, pk=None): # pk here could be menuitem_id to remove from cart
@@ -303,6 +321,58 @@ class CartViewSet(viewsets.ViewSet):
         """
         Cart.objects.filter(user=request.user).delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+    def update_by_menuitem(self, request, menuitem_id=None):
+        """
+        Update cart item using menuitem_id from URL path (RESTful approach).
+        URL: PUT /api/cart/menu-items/{menuitem_id}/
+        """
+        quantity = request.data.get('quantity')
+
+        if not quantity:
+            return Response({"error": "Quantity is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            quantity = int(quantity)
+            if quantity <= 0:
+                return Response({"error": "Quantity must be a positive integer."}, status=status.HTTP_400_BAD_REQUEST)
+        except ValueError:
+            return Response({"error": "Invalid quantity."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            menuitem = MenuItem.objects.get(pk=menuitem_id)
+        except MenuItem.DoesNotExist:
+            return Response({"error": "MenuItem not found."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            cart_item = Cart.objects.get(user=request.user, menuitem=menuitem)
+        except Cart.DoesNotExist:
+            return Response({"error": "Cart item not found in your cart."}, status=status.HTTP_404_NOT_FOUND)
+
+        # Update quantity and price
+        cart_item.quantity = quantity
+        cart_item.price = cart_item.unit_price * cart_item.quantity
+        cart_item.save()
+
+        serializer = CartItemSerializer(cart_item, context={'request': request})
+        return Response(serializer.data)
+
+    def delete_by_menuitem(self, request, menuitem_id=None):
+        """
+        Delete cart item using menuitem_id from URL path (RESTful approach).
+        URL: DELETE /api/cart/menu-items/{menuitem_id}/
+        """
+        try:
+            menuitem = MenuItem.objects.get(pk=menuitem_id)
+        except MenuItem.DoesNotExist:
+            return Response({"error": "MenuItem not found."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            cart_item = Cart.objects.get(user=request.user, menuitem=menuitem)
+            cart_item.delete()
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        except Cart.DoesNotExist:
+            return Response({"error": "Cart item not found in your cart."}, status=status.HTTP_404_NOT_FOUND)
     
 from rest_framework.decorators import action
 
@@ -313,15 +383,18 @@ class OrderViewSet(viewsets.ViewSet):
     Managers can list, view, filter, assign delivery crew, and update order status.
     Delivery crew can view assigned orders and update order status to delivered.
     """
+    lookup_url_kwarg = 'pk'  # Explicitly define lookup_url_kwarg
+    lookup_field = 'pk'     # Explicitly define lookup_field
+    queryset = Order.objects.all()
     permission_classes_by_action = {
         'list': [IsAuthenticated], # For all authenticated users (customers, managers, delivery crew) - will refine further
         'retrieve': [IsAuthenticated], # For all authenticated users - will refine further
         'create': [IsAuthenticated], # Customers placing orders
-        'update': [IsAuthenticated, IsAdminUser], # Managers updating order details (initially admin only for simplicity)
-        'partial_update': [IsAuthenticated, IsAdminUser], # Managers partially updating orders
-        'destroy': [IsAuthenticated, IsAdminUser], # Managers deleting orders (admin only initially)
-        'assign_delivery_crew': [IsAuthenticated, IsAdminUser], # Managers assigning delivery crew
-        'update_order_status_to_delivered': [IsAuthenticated], # Delivery crew updating status
+        'update': [IsAuthenticated, IsManager], # Use IsManager for manager-only update
+        'partial_update': [IsAuthenticated, IsManager], # Use IsManager for manager-only partial update
+        'destroy': [IsAuthenticated, IsManager], # Use IsManager for manager-only delete
+        'assign_delivery_crew': [IsAuthenticated, IsManager], # Use IsManager for assign_delivery_crew
+        'update_order_status_to_delivered': [IsAuthenticated, IsDeliveryCrew], # Use IsDeliveryCrew for delivery crew status update
     }
 
     def get_permissions(self):
@@ -332,12 +405,23 @@ class OrderViewSet(viewsets.ViewSet):
 
     def list(self, request):
         """
-        List orders based on user role.
-        Customers: See their own order history.
-        Managers/Delivery Crew: See all orders (with filtering later).
+        List orders based on user role, with optional filtering by status for managers.
+         Customers: See their own order history.
+         Managers/Delivery Crew: See all orders (with filtering by status for managers).
         """
-        if request.user.groups.filter(name='Manager').exists() or request.user.is_superuser: # Managers and Admin can see all orders for now
-            queryset = Order.objects.all()
+        queryset = Order.objects.all() # Start with all orders queryset
+        status_filter_str = request.query_params.get('status') # Get status as string from query params (important for validation)
+        status_filter = None # Initialize status_filter to None
+
+        if request.user.groups.filter(name='Manager').exists() or request.user.is_superuser: # Managers and Admin can see all orders, with filtering
+            if status_filter_str: # If status filter is provided
+                valid_status_choices = [str(code) for code, label in Order.STATUS_CHOICES] # Get valid status codes as strings
+                if status_filter_str in valid_status_choices: # Validate against valid choices (as strings)
+                    status_filter = int(status_filter_str) # Convert to integer for filtering
+                    queryset = queryset.filter(status=status_filter) # Filter queryset by status value
+                else:
+                    return Response({"error": f"Invalid status value. Allowed values are: {', '.join(valid_status_choices)}"}, status=status.HTTP_400_BAD_REQUEST) # Return 400 for invalid status
+
             serializer = OrderSerializer(queryset, many=True)
             return Response(serializer.data)
         elif request.user.groups.filter(name='Delivery crew').exists(): # Delivery crew sees assigned orders (to be implemented filtering later)
@@ -451,12 +535,14 @@ class OrderViewSet(viewsets.ViewSet):
         """
         Delivery crew updates order status to 'Delivered'.
         """
-        if not request.user.groups.filter(name='Delivery crew').exists(): # Only delivery crew can update status
-            return Response({"error": "Only delivery crew can update order status."}, status=status.HTTP_403_FORBIDDEN)
+        if not (request.user.groups.filter(name='Manager').exists() or request.user.groups.filter(name='Delivery crew').exists()): # Only delivery crew can update status
+            return Response({"error": "Only delivery crew or managers can update order status."}, status=status.HTTP_403_FORBIDDEN)
 
         order = self.get_object() # Helper to get Order instance
-        if order.delivery_crew != request.user: # Ensure delivery crew is assigned to this order
-            return Response({"error": "You are not assigned to this order."}, status=status.HTTP_403_FORBIDDEN)
+
+        if request.user.groups.filter(name='Delivery crew').exists(): # Check for Delivery Crew *specifically*
+            if order.delivery_crew != request.user: # Delivery crew assignment check
+                  return Response({"error": "You are not assigned to this order."}, status=status.HTTP_403_FORBIDDEN)
 
         order.status = 2 # Delivered status code (see Order model STATUS_CHOICES)
         order.save()
@@ -472,3 +558,136 @@ class OrderViewSet(viewsets.ViewSet):
         obj = get_object_or_404(queryset, **filter_kwargs)
         self.check_object_permissions(self.request, obj) # Optional permission check for object level
         return obj
+    
+class GroupViewSet(viewsets.ViewSet):
+    """
+    ViewSet for listing groups and managing user group assignments (Manager role).
+    """
+    lookup_url_kwarg = 'pk'  # Explicitly define lookup_url_kwarg
+    lookup_field = 'pk' 
+    permission_classes = [IsAuthenticated, IsAdminUser] # Only managers and admins can access these endpoints
+
+    def list(self, request):
+        """
+        List all available groups (e.g., Manager, Delivery crew).
+        """
+        queryset = Group.objects.all()
+        serializer = GroupSerializer(queryset, many=True)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['put']) # Custom action to add a user to a group (Manager action)
+    def add_user(self, request, pk=None): # pk will be group ID
+        """
+        Add a user to a group.
+        Expects 'user_id' in request data.
+        """
+        group = self.get_object() # Get the group instance based on pk (group ID)
+
+        username = request.data.get('username') # Expect username instead of user_id for easier use (can change to user_id if preferred)
+        if not username:
+            return Response({"error": "Username is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            user = User.objects.get(username=username)
+        except User.DoesNotExist:
+            return Response({"error": "User not found."}, status=status.HTTP_400_BAD_REQUEST)
+
+        group.user_set.add(user) # Add user to the group (using User.groups ManyToManyField)
+        return Response({"message": f"User '{user.username}' added to group '{group.name}'."}, status=status.HTTP_200_OK)
+
+
+    @action(detail=True, methods=['delete']) # Custom action to remove a user from a group (Manager action)
+    def remove_user(self, request, pk=None): # pk will be group ID
+        """
+        Remove a user from a group.
+        Expects 'username' in request data.
+        """
+        group = self.get_object() # Get the group instance based on pk (group ID)
+
+        username = request.data.get('username') # Expect username in request data
+        if not username:
+            return Response({"error": "Username is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            user = User.objects.get(username=username)
+        except User.DoesNotExist:
+            return Response({"error": "User not found."}, status=status.HTTP_400_BAD_REQUEST)
+
+        group.user_set.remove(user) # Remove user from the group
+        return Response({"message": f"User '{user.username}' removed from group '{group.name}'."}, status=status.HTTP_200_OK)
+
+
+    def get_object(self): # Helper method to get Group instance for detail actions (add/remove user)
+        queryset = Group.objects.all() # Get all groups queryset
+        lookup_url_kwarg = self.lookup_url_kwarg or self.lookup_field
+        filter_kwargs = {self.lookup_field: self.kwargs[lookup_url_kwarg]}
+        obj = get_object_or_404(queryset, **filter_kwargs)
+        self.check_object_permissions(self.request, obj) # Optional permission check (not really needed for GroupViewSet in this example as permission is on ViewSet level)
+        return obj  
+    
+
+class DirectOrderCreateView(APIView):
+    """
+    View to create an order directly from payload data for voice orders.
+    Sets user to None and is_voice_order to True.
+    """
+    permission_classes = [HasAPIKey]
+
+    def post(self, request, *args, **kwargs):
+        input_serializer = DirectOrderInputSerializer(data=request.data)
+        if not input_serializer.is_valid():
+            return Response(input_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        validated_data = input_serializer.validated_data
+        items_data = validated_data['items']
+
+        try:
+            # --- Optional: Try to find existing user by phone ---
+            # existing_user = User.objects.filter(profile__phone=validated_data['customer_phone']).first() # Requires a Profile model or similar
+            # user_to_assign = existing_user # Assign if found, otherwise None below is fine
+            # --- End Optional ---
+
+            with transaction.atomic():
+                total_price = Decimal(0)
+                menu_items_map = {}
+                order_item_instances = []
+
+                # Validate items and calculate total price (same logic as before)
+                for item_data in items_data:
+                    menuitem_id = item_data['menuitem_id']
+                    quantity = item_data['quantity']
+                    if menuitem_id not in menu_items_map:
+                         try:
+                             menu_item = MenuItem.objects.get(pk=menuitem_id)
+                             menu_items_map[menuitem_id] = menu_item
+                         except MenuItem.DoesNotExist:
+                             return Response({"error": f"MenuItem with id {menuitem_id} not found."}, status=status.HTTP_400_BAD_REQUEST)
+                    else:
+                         menu_item = menu_items_map[menuitem_id]
+                    item_total = menu_item.price * quantity
+                    total_price += item_total
+                    order_item_instances.append(OrderItem(menuitem=menu_item, quantity=quantity, price=item_total))
+
+                # --- Create Order, setting user=None and is_voice_order=True ---
+                order = Order.objects.create(
+                    user=None, # Assign None for voice orders
+                    # user=user_to_assign, # Use this if implementing optional user lookup
+                    total=total_price,
+                    status=0,
+                    customer_name=validated_data['customer_name'],
+                    customer_phone=validated_data['customer_phone'],
+                    delivery_address=validated_data['delivery_address'],
+                    is_voice_order=True # Set the flag
+                )
+                # --- End Order Creation ---
+
+                for oi in order_item_instances:
+                    oi.order = order
+                OrderItem.objects.bulk_create(order_item_instances)
+
+                response_serializer = OrderSerializer(order)
+                return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+
+        except Exception as e:
+            print(f"Error creating direct order: {e}")
+            return Response({"error": "An internal error occurred while creating the order."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

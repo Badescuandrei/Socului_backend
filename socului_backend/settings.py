@@ -10,6 +10,7 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.1/ref/settings/
 """
 
+import datetime
 from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -25,9 +26,18 @@ SECRET_KEY = 'django-insecure-irgt@qlz!gbp3_z)1uhfegg1bu@wy140aui23k$l(nmid80r32
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ['127.0.0.1', 'localhost', '10.0.2.2', '192.168.1.103']
 
+# Media files (User Uploads)
+MEDIA_URL = '/media/' # Base URL for serving media files
+MEDIA_ROOT = BASE_DIR / 'media' # Absolute filesystem path to the directory for user uploads
 
+# Default primary key field type
+# https://docs.djangoproject.com/en/5.1/ref/settings/#default-auto-field
+
+DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+# ... rest of your settings (REST_FRAMEWORK, DJOSER, etc.) ...
 # Application definition
 
 INSTALLED_APPS = [
@@ -41,6 +51,7 @@ INSTALLED_APPS = [
     'restaurant', # Add the restaurant app
     'djoser',
     'rest_framework_simplejwt',
+    'rest_framework_api_key',
 ]
 
 MIDDLEWARE = [
@@ -115,6 +126,8 @@ USE_I18N = True
 
 USE_TZ = True
 
+N8N_WEBHOOK_URL = 'https://deadstockro.app.n8n.cloud/webhook-test/54395520-dbcb-4927-bf9d-5699d67c0c2c'
+
 
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/5.1/howto/static-files/
@@ -132,7 +145,15 @@ REST_FRAMEWORK = {
     ),
     'DEFAULT_PERMISSION_CLASSES': (
         'rest_framework.permissions.IsAuthenticatedOrReadOnly', # Default permission: AllowAny read, IsAuthenticated for write
-    )
+    ),
+    # 'DEFAULT_THROTTLE_CLASSES': ( # Add throttling classes here
+    #     'rest_framework.throttling.UserRateThrottle', # User-based throttling
+    #     'rest_framework.throttling.AnonRateThrottle', # Anonymous user throttling
+    # ),
+    # 'DEFAULT_THROTTLE_RATES': { # Define throttle rates
+    #     'user': '5/minute',  # Authenticated users: 5 requests per minute
+    #     'anon': '5/minute',  # Anonymous
+    # }
 }
 
 DJOSER = {
@@ -145,4 +166,14 @@ DJOSER = {
     #     'user': 'restaurant.serializers.UserSerializer', # Use our UserSerializer for user details
     #     'current_user': 'restaurant.serializers.UserSerializer', # Use our UserSerializer for current user details
     # }
+}
+
+SIMPLE_JWT = {
+    'ACCESS_TOKEN_LIFETIME': datetime.timedelta(minutes=5),
+    'REFRESH_TOKEN_LIFETIME': datetime.timedelta(minutes=5),
+    # 'ROTATE_REFRESH_TOKENS': True,
+}
+
+JWT_AUTH = {
+'JWT_REFRESH_EXPIRATION_DELTA': datetime.timedelta(minutes=1), # Set refresh token expiration time
 }
