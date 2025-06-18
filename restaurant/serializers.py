@@ -1,6 +1,31 @@
 from rest_framework import serializers
 from .models import Category, MenuItem, Cart, Order, OrderItem, OptionGroup, OptionChoice
 from django.contrib.auth.models import User, Group
+from djoser.serializers import UserCreateSerializer as BaseUserCreateSerializer
+
+class UserCreateSerializer(BaseUserCreateSerializer):
+    class Meta(BaseUserCreateSerializer.Meta):
+        phone_number = serializers.CharField(write_only=True)
+        fields = ['id', 'email', 'first_name', 'last_name', 'password']
+
+    def create(self, validated_data):
+        # Set the username to be the same as the email
+        validated_data['username'] = validated_data['email']
+
+        # Extract the phone_number from the validated data
+        phone_number = validated_data.pop('phone_number', None)
+
+        # Let the parent Djoser serializer create the user first
+        user = super().create(validated_data)
+
+        # Now that the user is created, the post_save signal in your models.py 
+        # has already created the associated UserProfile.
+        # We can now update it with the phone number.
+        if phone_number:
+            user.userprofile.phone_number = phone_number
+            user.userprofile.save()
+
+        return user
 
 class CategorySerializer(serializers.ModelSerializer):
     image_url = serializers.SerializerMethodField()
