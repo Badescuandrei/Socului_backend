@@ -49,3 +49,4 @@ db.sqlite3-journal
 # IDE-specific
 .idea/
 .vscode/
+requirements.md
