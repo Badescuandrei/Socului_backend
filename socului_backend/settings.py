@@ -12,6 +12,7 @@ https://docs.djangoproject.com/en/5.1/ref/settings/
 
 import datetime
 from pathlib import Path
+from decouple import config
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -21,7 +22,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/5.1/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-irgt@qlz!gbp3_z)1uhfegg1bu@wy140aui23k$l(nmid80r32'
+SECRET_KEY = config('SECRET_KEY')
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
@@ -161,12 +162,13 @@ DJOSER = {
     'PASSWORD_RESET_CONFIRM_URL': '#/password/reset/confirm/{uid}/{token}', # Frontend URL for password reset confirm
     'USERNAME_RESET_CONFIRM_URL': '#/username/reset/confirm/{uid}/{token}', # Frontend URL for username reset confirm
     'ACTIVATION_URL': '#/activate/{uid}/{token}', # Frontend URL for account activation (if using email verification)
-    'SEND_ACTIVATION_EMAIL': False, # Set to True if you want to use email verification during registration
-    # 'SERIALIZERS': {
-    #     'user_create': 'restaurant.serializers.UserSerializer', # Use our UserSerializer for registration
-    #     'user': 'restaurant.serializers.UserSerializer', # Use our UserSerializer for user details
-    #     'current_user': 'restaurant.serializers.UserSerializer', # Use our UserSerializer for current user details
-    # }
+    'SEND_ACTIVATION_EMAIL': True, 
+    'LOGIN_FIELD': 'email',
+     'SERIALIZERS': {
+        'user_create': 'restaurant.serializers.UserCreateSerializer',
+        'user': 'djoser.serializers.UserSerializer',
+        'current_user': 'djoser.serializers.UserSerializer',
+    },
 }
 
 SIMPLE_JWT = {

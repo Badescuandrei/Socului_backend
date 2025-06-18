@@ -13,6 +13,7 @@ pillow = "*"
 djangorestframework-api-key = "*"
 requests = "*"
 django-unfold = "*"
+python-decouple = "*"
 
 [dev-packages]
 
