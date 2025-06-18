@@ -180,3 +180,15 @@ SIMPLE_JWT = {
 JWT_AUTH = {
 'JWT_REFRESH_EXPIRATION_DELTA': datetime.timedelta(minutes=1), # Set refresh token expiration time
 }
+
+
+# ==============================================================================
+# EMAIL CONFIGURATION (SendGrid SMTP)
+# ==============================================================================
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST = 'smtp.sendgrid.net'
+EMAIL_PORT = 587
+EMAIL_USE_TLS = True
+EMAIL_HOST_USER = 'apikey' # This is literally the string 'apikey' for SendGrid API keys
+EMAIL_HOST_PASSWORD = config('SENDGRID_API_KEY') # Securely reads your SendGrid API key from .env
+DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default='Socului Delivery <noreply@example.com>') # Securely reads your default 'from' email
