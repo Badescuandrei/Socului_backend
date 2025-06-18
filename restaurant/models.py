@@ -71,8 +71,49 @@ class MenuItem(models.Model):
     category = models.ForeignKey(Category, on_delete=models.PROTECT)
     image = models.ImageField(upload_to='menu_items/', blank=True, null=True)
 
+    # New Fields from our discussion
+    is_standalone_item = models.BooleanField(
+        default=True, 
+        help_text="Can this item be purchased on its own from the menu?"
+    )
+    is_available = models.BooleanField(
+        default=True, 
+        db_index=True, 
+        help_text="Is this item available for purchase or as an option?"
+    )
+    allergens = models.TextField(blank=True, null=True)
+    ingredient_list = models.TextField(blank=True, null=True)
+    nutritional_info = models.JSONField(
+        blank=True, 
+        null=True, 
+        help_text="e.g., {'calories': 500, 'protein_g': 25}"
+    )
+
     def __str__(self):
         return self.title
+
+class OptionGroup(models.Model):
+    name = models.CharField(max_length=100, help_text="e.g., 'Sides', 'Choose your sauces'")
+    menu_item = models.ForeignKey(MenuItem, on_delete=models.CASCADE, related_name='option_groups')
+    min_selection = models.PositiveIntegerField(default=1)
+    max_selection = models.PositiveIntegerField(default=1)
+
+    def __str__(self):
+        return f"Option Group '{self.name}' for {self.menu_item.title}"
+
+class OptionChoice(models.Model):
+    group = models.ForeignKey(OptionGroup, on_delete=models.CASCADE, related_name='choices')
+    item = models.ForeignKey(MenuItem, on_delete=models.CASCADE, help_text="The MenuItem being offered as a choice.")
+    price_adjustment = models.DecimalField(
+        max_digits=6, 
+        decimal_places=2, 
+        default=0.00, 
+        help_text="Price difference. Can be positive (upcharge) or negative (discount)."
+    )
+    is_default = models.BooleanField(default=False, help_text="Is this option selected by default?")
+
+    def __str__(self):
+        return f"Choice '{self.item.title}' in group '{self.group.name}'"
     
 class Cart(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE)
@@ -80,9 +121,7 @@ class Cart(models.Model):
     quantity = models.SmallIntegerField()
     unit_price = models.DecimalField(max_digits=6, decimal_places=2)
     price = models.DecimalField(max_digits=6, decimal_places=2)
-
-    class Meta:
-        unique_together = ('menuitem', 'user')
+    selected_options = models.ManyToManyField('OptionChoice', blank=True)
 
     def __str__(self):
         return f"Cart for {self.user.username} - MenuItem: {self.menuitem.title}"
@@ -132,9 +171,7 @@ class OrderItem(models.Model):
     menuitem = models.ForeignKey(MenuItem, on_delete=models.CASCADE)
     quantity = models.SmallIntegerField()
     price = models.DecimalField(max_digits=6, decimal_places=2) # Added price to OrderItem
-
-    class Meta:
-        unique_together = ('order', 'menuitem')
+    selected_options = models.ManyToManyField('OptionChoice', blank=True)
 
     def __str__(self):
         return f"OrderItem for Order #{self.order.pk} - MenuItem: {self.menuitem.title}, Quantity: {self.quantity}"

@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Category, MenuItem, Cart, Order, OrderItem
+from .models import Category, MenuItem, Cart, Order, OrderItem, OptionGroup, OptionChoice
 from django.contrib.auth.models import User, Group
 
 class CategorySerializer(serializers.ModelSerializer):
@@ -23,8 +23,11 @@ class MenuItemSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = MenuItem
-        # --- CORRECTED: Added 'image_url' to fields ---
-        fields = ['id', 'title', 'price', 'featured', 'category', 'category_id', 'image_url']
+        fields = [
+            'id', 'title', 'price', 'featured', 'category', 'category_id', 
+            'image_url', 'is_standalone_item', 'is_available', 
+            'allergens', 'ingredient_list', 'nutritional_info'
+        ]
 
     def get_image_url(self, obj):
         request = self.context.get('request')
@@ -32,15 +35,44 @@ class MenuItemSerializer(serializers.ModelSerializer):
             return request.build_absolute_uri(obj.image.url)
         return None
 
+class OptionChoiceSerializer(serializers.ModelSerializer):
+    item_title = serializers.CharField(source='item.title', read_only=True)
+    is_available = serializers.BooleanField(source='item.is_available', read_only=True)
+
+    class Meta:
+        model = OptionChoice
+        fields = ['id', 'item_title', 'price_adjustment', 'is_default', 'is_available']
+
+
+class OptionGroupSerializer(serializers.ModelSerializer):
+    choices = OptionChoiceSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = OptionGroup
+        fields = ['name', 'min_selection', 'max_selection', 'choices']
+
+
+class MenuItemDetailSerializer(MenuItemSerializer):
+    option_groups = OptionGroupSerializer(many=True, read_only=True)
+
+    class Meta(MenuItemSerializer.Meta):
+        fields = MenuItemSerializer.Meta.fields + ['option_groups']
+
+
 class CartItemSerializer(serializers.ModelSerializer):
     menuitem = MenuItemSerializer(read_only=True)
     menuitem_id = serializers.PrimaryKeyRelatedField(queryset=MenuItem.objects.all(), source='menuitem', write_only=True)
-    price = serializers.DecimalField(max_digits=6, decimal_places=2, read_only=True) # Make price read-only, calculated in backend
+    price = serializers.DecimalField(max_digits=6, decimal_places=2, read_only=True)
+    selected_options = serializers.PrimaryKeyRelatedField(
+        queryset=OptionChoice.objects.all(),
+        many=True,
+        required=False
+    )
 
     class Meta:
         model = Cart
-        fields = ['id', 'menuitem', 'menuitem_id', 'quantity', 'unit_price', 'price'] # Include 'id'
-        read_only_fields = ['unit_price', 'price'] # unit_price will be set in view
+        fields = ['id', 'menuitem', 'menuitem_id', 'quantity', 'unit_price', 'price', 'selected_options']
+        read_only_fields = ['unit_price', 'price']
 
 class CartSerializer(serializers.ModelSerializer):
     cartitem_set = CartItemSerializer(many=True, read_only=True, source='cart_set') # Use related_name if you set it in model
@@ -52,10 +84,11 @@ class CartSerializer(serializers.ModelSerializer):
 class OrderItemSerializer(serializers.ModelSerializer):
     menuitem = MenuItemSerializer(read_only=True)
     menuitem_id = serializers.PrimaryKeyRelatedField(queryset=MenuItem.objects.all(), source='menuitem', write_only=True)
+    selected_options = OptionChoiceSerializer(many=True, read_only=True)
 
     class Meta:
         model = OrderItem
-        fields = ['id', 'order', 'menuitem', 'menuitem_id', 'quantity', 'price'] # Include 'id'
+        fields = ['id', 'order', 'menuitem', 'menuitem_id', 'quantity', 'price', 'selected_options']
 
 class OrderSerializer(serializers.ModelSerializer):
     user = serializers.PrimaryKeyRelatedField(queryset=User.objects.all()) # Or UserSerializer if you create one

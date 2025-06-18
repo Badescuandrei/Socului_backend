@@ -12,6 +12,7 @@ djangorestframework-simplejwt = "*"
 pillow = "*"
 djangorestframework-api-key = "*"
 requests = "*"
+django-unfold = "*"
 
 [dev-packages]
 

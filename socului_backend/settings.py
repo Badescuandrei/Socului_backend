@@ -26,7 +26,7 @@ SECRET_KEY = 'django-insecure-irgt@qlz!gbp3_z)1uhfegg1bu@wy140aui23k$l(nmid80r32
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['127.0.0.1', 'localhost', '10.0.2.2', '192.168.1.103']
+ALLOWED_HOSTS = ['127.0.0.1', 'localhost', '10.0.2.2', '192.168.1.103', '192.168.1.146']
 
 # Media files (User Uploads)
 MEDIA_URL = '/media/' # Base URL for serving media files
@@ -41,6 +41,7 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 # Application definition
 
 INSTALLED_APPS = [
+    'unfold',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',

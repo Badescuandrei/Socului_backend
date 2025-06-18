@@ -2,8 +2,11 @@ from django.shortcuts import render
 from rest_framework import viewsets, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from .models import Cart, Category, MenuItem, Order, OrderItem
-from .serializers import CartItemSerializer, CategorySerializer, DirectOrderInputSerializer, GroupSerializer, MenuItemSerializer, OrderSerializer
+from .models import Cart, Category, MenuItem, Order, OrderItem, OptionChoice
+from .serializers import (
+    CartItemSerializer, CategorySerializer, DirectOrderInputSerializer, 
+    GroupSerializer, MenuItemSerializer, MenuItemDetailSerializer, OrderSerializer
+)
 from rest_framework.permissions import IsAuthenticated, IsAdminUser, AllowAny
 from rest_framework.decorators import api_view, permission_classes, action
 from django.shortcuts import get_object_or_404
@@ -103,49 +106,55 @@ class CategoryViewSet(viewsets.ViewSet):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
-class MenuItemViewSet(viewsets.ViewSet):
+class MenuItemViewSet(viewsets.ModelViewSet):
     """
     ViewSet for viewing and editing MenuItems.
+    - List view is lightweight and for public browsing.
+    - Detail view includes all customization options.
     """
-    permission_classes_by_action = {
-       'list': [AllowAny],
-        'retrieve': [AllowAny],
-        'create': [IsAuthenticated, IsManager], # Use IsManager instead of IsAdminUser
-        'update': [IsAuthenticated, IsManager], # Use IsManager instead of IsAdminUser
-        'partial_update': [IsAuthenticated, IsManager], # Use IsManager instead of IsAdminUser
-        'destroy': [IsAuthenticated, IsManager], # Use IsManager instead of IsAdminUser
-    }
+    queryset = MenuItem.objects.all()
+
+    def get_serializer_class(self):
+        if self.action == 'retrieve':
+            return MenuItemDetailSerializer
+        return MenuItemSerializer
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+
+        # For list view, only show available, standalone items
+        if self.action == 'list':
+            queryset = queryset.filter(is_standalone_item=True, is_available=True)
+            # Apply existing filters from original code
+            category_name = self.request.query_params.get('category')
+            to_price = self.request.query_params.get('to_price')
+            search = self.request.query_params.get('search')
+            ordering = self.request.query_params.get('ordering')
+
+            if category_name:
+                queryset = queryset.filter(category__slug=category_name)
+            if to_price:
+                queryset = queryset.filter(price__lte=to_price)
+            if search:
+                queryset = queryset.filter(title__icontains=search)
+            if ordering:
+                queryset = queryset.order_by(ordering)
+
+        # For retrieve view, prefetch related options for efficiency
+        elif self.action == 'retrieve':
+            queryset = queryset.prefetch_related(
+                'option_groups__choices__item'
+            )
+        
+        return queryset.select_related('category')
+
 
     def get_permissions(self):
-        try:
-            # return permission_classes depending on `action`
-            return [permission() for permission in self.permission_classes_by_action[self.action]]
-        except KeyError:
-            # action is not set return default permission_classes
-            return [permission() for permission in self.permission_classes]
-
-    def list(self, request):
-        """
-        List all menu items, with optional filtering and pagination. Publicly accessible.
-        """
-        queryset = MenuItem.objects.select_related('category').all() # Optimize with select_related
-        category_name = request.query_params.get('category') # Filter by category slug
-        to_price = request.query_params.get('to_price') # Filter by price (less than or equal to)
-        search = request.query_params.get('search') # Search by title (icontains)
-        ordering = request.query_params.get('ordering') # Ordering by fields
-
-        if category_name:
-            queryset = queryset.filter(category__slug=category_name)
-        if to_price:
-            queryset = queryset.filter(price__lte=to_price)
-        if search:
-            queryset = queryset.filter(title__icontains=search)
-        if ordering:
-            queryset = queryset.order_by(ordering)
-
-        serializer = MenuItemSerializer(queryset, many=True, context={'request': request}) # No pagination for now, add later if needed
-        return Response(serializer.data)
-
+        if self.action in ['list', 'retrieve']:
+            permission_classes = [AllowAny]
+        else:
+            permission_classes = [IsAuthenticated, IsManager]
+        return [permission() for permission in permission_classes]
 
     def retrieve(self, request, pk=None):
         """
@@ -153,7 +162,7 @@ class MenuItemViewSet(viewsets.ViewSet):
         """
         queryset = MenuItem.objects.select_related('category').all() # Optimize with select_related
         menuitem = get_object_or_404(queryset, pk=pk)
-        serializer = MenuItemSerializer(menuitem, context={'request': request})
+        serializer = MenuItemDetailSerializer(menuitem, context={'request': request})
         return Response(serializer.data)
 
     def create(self, request):
@@ -215,120 +224,74 @@ class CartViewSet(viewsets.ViewSet):
 
     def create(self, request):
         """
-        Add a menu item to the current user's cart.
-        Expects menuitem_id and quantity in request data.
+        Add a menu item to the cart with selected options.
+        If an identical item (same menuitem and same options) already exists
+        in the cart, its quantity is increased. Otherwise, a new cart item is created.
         """
-        menuitem_id = request.data.get('menuitem_id')
-        quantity = request.data.get('quantity')
+        serializer = CartItemSerializer(data=request.data, context={'request': self.request})
+        serializer.is_valid(raise_exception=True)
+        
+        menuitem = serializer.validated_data['menuitem']
+        quantity = serializer.validated_data['quantity']
+        selected_options = serializer.validated_data.get('selected_options', [])
 
-        if not menuitem_id or not quantity:
-            return Response({"error": "Both menuitem_id and quantity are required."}, status=status.HTTP_400_BAD_REQUEST)
+        # Calculate total price for the item
+        unit_price = menuitem.price
+        options_price = sum(option.price_adjustment for option in selected_options)
+        total_price = (unit_price + options_price) * quantity
 
-        try:
-            menuitem = MenuItem.objects.get(pk=menuitem_id)
-        except MenuItem.DoesNotExist:
-            return Response({"error": "MenuItem not found."}, status=status.HTTP_400_BAD_REQUEST)
+        # --- Smart Cart Item Logic ---
+        # Look for an existing cart item with the exact same options
+        cart_item = None
+        existing_items = Cart.objects.filter(user=request.user, menuitem=menuitem)
+        for item in existing_items:
+            if set(item.selected_options.all()) == set(selected_options):
+                cart_item = item
+                break
 
-        try:
-            quantity = int(quantity)
-            if quantity <= 0:
-                return Response({"error": "Quantity must be a positive integer."}, status=status.HTTP_400_BAD_REQUEST)
-        except ValueError:
-            return Response({"error": "Invalid quantity."}, status=status.HTTP_400_BAD_REQUEST)
+        if cart_item:
+            # Item exists, update quantity and price
+            cart_item.quantity += quantity
+            # Recalculate price for the updated total quantity
+            cart_item.price = (cart_item.unit_price + options_price) * cart_item.quantity
+            cart_item.save()
+            # Update serializer instance with the updated object
+            serializer = CartItemSerializer(cart_item, context={'request': self.request})
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        else:
+            # Item does not exist, create a new one
+            cart_item = Cart.objects.create(
+                user=request.user,
+                menuitem=menuitem,
+                quantity=quantity,
+                unit_price=unit_price + options_price, # Store unit price including options
+                price=total_price,
+            )
+            cart_item.selected_options.set(selected_options)
+            serializer = CartItemSerializer(cart_item, context={'request': self.request})
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
 
-        # Get or create cart item for the user and menuitem
-        cart_item, created = Cart.objects.get_or_create(
-            user=request.user,
-            menuitem=menuitem,
-            defaults={'quantity': 0, 'unit_price': menuitem.price, 'price': 0} # Initialize if creating
-        )
-
-        # Update quantity and price
-        if not created: # If item already existed, update quantity
-             cart_item.quantity += quantity
-        else: # If newly created, set quantity
-             cart_item.quantity = quantity
-
-        cart_item.price = cart_item.unit_price * cart_item.quantity
-        cart_item.save()
-
-        # --- PASS CONTEXT TO CartItemSerializer ---
-        serializer = CartItemSerializer(cart_item, context={'request': request})
-        return Response(serializer.data, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK) # 201 if created, 200 if updated
-
-    def update(self, request, pk=None): # pk is not really used for cart update in this design, but included for ViewSet consistency
+    def retrieve(self, request, pk=None):
         """
-        Update a cart item (e.g., change quantity).
-        Expects quantity in request data. Cart item is identified by menuitem_id in URL or body.
+        Retrieve a specific cart item by its ID.
+        URL: GET /api/cart/items/{cart_item_id}/
         """
-        menuitem_id = request.data.get('menuitem_id') # Or get pk from URL if you prefer
-        quantity = request.data.get('quantity')
-
-        if not quantity or not menuitem_id:
-            return Response({"error": "Both menuitem_id and quantity are required."}, status=status.HTTP_400_BAD_REQUEST)
-
         try:
-            menuitem = MenuItem.objects.get(pk=menuitem_id)
-        except MenuItem.DoesNotExist:
-            return Response({"error": "MenuItem not found."}, status=status.HTTP_400_BAD_REQUEST)
-
-        try:
-            quantity = int(quantity)
-            if quantity <= 0:
-                return Response({"error": "Quantity must be a positive integer."}, status=status.HTTP_400_BAD_REQUEST)
-        except ValueError:
-            return Response({"error": "Invalid quantity."}, status=status.HTTP_400_BAD_REQUEST)
-
-        try:
-            cart_item = Cart.objects.get(user=request.user, menuitem=menuitem)
+            cart_item = Cart.objects.get(user=request.user, pk=pk)
+            serializer = CartItemSerializer(cart_item, context={'request': request})
+            return Response(serializer.data)
         except Cart.DoesNotExist:
             return Response({"error": "Cart item not found in your cart."}, status=status.HTTP_404_NOT_FOUND)
 
-        # Update quantity and price
-        cart_item.quantity = quantity
-        cart_item.price = cart_item.unit_price * cart_item.quantity
-        cart_item.save()
-
-        serializer = CartItemSerializer(cart_item, context={'request': request})
-        return Response(serializer.data)
-
-    def destroy(self, request, pk=None): # pk here could be menuitem_id to remove from cart
+    def update(self, request, pk=None):
         """
-        Remove a menu item from the current user's cart.
-        Expects menuitem_id in URL or request data (pk here could be menuitem_id).
+        Update a cart item quantity using cart item ID from URL.
+        URL: PUT /api/cart/items/{cart_item_id}/
         """
-        menuitem_id_to_remove = request.data.get('menuitem_id') or pk # Try to get from body or URL pk
-
-        if not menuitem_id_to_remove:
-            return Response({"error": "menuitem_id is required to remove from cart."}, status=status.HTTP_400_BAD_REQUEST)
-
-        try:
-            menuitem_to_remove = MenuItem.objects.get(pk=menuitem_id_to_remove)
-        except MenuItem.DoesNotExist:
-            return Response({"error": "MenuItem not found."}, status=status.HTTP_400_BAD_REQUEST)
-
-        try:
-            cart_item = Cart.objects.get(user=request.user, menuitem=menuitem_to_remove)
-            cart_item.delete()
-            return Response(status=status.HTTP_204_NO_CONTENT)
-        except Cart.DoesNotExist:
-            return Response({"error": "Cart item not found in your cart."}, status=status.HTTP_404_NOT_FOUND)
-
-    @action(detail=False, methods=['delete']) # Custom action for flushing cart
-    def flush(self, request):
-        """
-        Flush (empty) the current user's cart.
-        """
-        Cart.objects.filter(user=request.user).delete()
-        return Response(status=status.HTTP_204_NO_CONTENT)
-
-    def update_by_menuitem(self, request, menuitem_id=None):
-        """
-        Update cart item using menuitem_id from URL path (RESTful approach).
-        URL: PUT /api/cart/menu-items/{menuitem_id}/
-        """
+        if not pk:
+            return Response({"error": "Cart item ID is required in URL."}, status=status.HTTP_400_BAD_REQUEST)
+            
         quantity = request.data.get('quantity')
-
         if not quantity:
             return Response({"error": "Quantity is required."}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -340,12 +303,7 @@ class CartViewSet(viewsets.ViewSet):
             return Response({"error": "Invalid quantity."}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            menuitem = MenuItem.objects.get(pk=menuitem_id)
-        except MenuItem.DoesNotExist:
-            return Response({"error": "MenuItem not found."}, status=status.HTTP_400_BAD_REQUEST)
-
-        try:
-            cart_item = Cart.objects.get(user=request.user, menuitem=menuitem)
+            cart_item = Cart.objects.get(user=request.user, pk=pk)
         except Cart.DoesNotExist:
             return Response({"error": "Cart item not found in your cart."}, status=status.HTTP_404_NOT_FOUND)
 
@@ -357,23 +315,31 @@ class CartViewSet(viewsets.ViewSet):
         serializer = CartItemSerializer(cart_item, context={'request': request})
         return Response(serializer.data)
 
-    def delete_by_menuitem(self, request, menuitem_id=None):
+    def partial_update(self, request, pk=None):
         """
-        Delete cart item using menuitem_id from URL path (RESTful approach).
-        URL: DELETE /api/cart/menu-items/{menuitem_id}/
+        Partially update a cart item (same as update for cart items).
         """
-        try:
-            menuitem = MenuItem.objects.get(pk=menuitem_id)
-        except MenuItem.DoesNotExist:
-            return Response({"error": "MenuItem not found."}, status=status.HTTP_400_BAD_REQUEST)
+        return self.update(request, pk)
 
+    def destroy(self, request, pk=None):
+        """
+        Deletes a specific item from the cart, identified by its Cart ID (pk).
+        """
         try:
-            cart_item = Cart.objects.get(user=request.user, menuitem=menuitem)
+            cart_item = Cart.objects.get(user=request.user, pk=pk)
             cart_item.delete()
             return Response(status=status.HTTP_204_NO_CONTENT)
         except Cart.DoesNotExist:
-            return Response({"error": "Cart item not found in your cart."}, status=status.HTTP_404_NOT_FOUND)
-    
+            return Response({"error": "Cart item not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    @action(detail=False, methods=['delete'])
+    def flush(self, request):
+        """
+        Clear all items from the current user's cart.
+        """
+        Cart.objects.filter(user=request.user).delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
 from rest_framework.decorators import action
 
 class OrderViewSet(viewsets.ViewSet):
@@ -449,29 +415,37 @@ class OrderViewSet(viewsets.ViewSet):
 
     def create(self, request):
         """
-        Place a new order (customer action - from cart).
+        Creates an order from the user's cart.
         """
-        cart_items = Cart.objects.filter(user=request.user)
+        user = request.user
+        cart_items = Cart.objects.filter(user=user)
+
         if not cart_items.exists():
             return Response({"error": "Your cart is empty."}, status=status.HTTP_400_BAD_REQUEST)
 
-        order_total = sum(item.price for item in cart_items) # Calculate total order amount
+        # Use a transaction to ensure atomicity
+        with transaction.atomic():
+            # Calculate total price
+            total = sum(item.price for item in cart_items)
 
-        order = Order.objects.create(user=request.user, total=order_total, status=0) # Create Order object, status = Pending
+            # Create the order
+            order = Order.objects.create(user=user, total=total, status=0)
 
-        order_items_list = [] # Prepare to create OrderItems
-        for cart_item in cart_items:
-            order_item = OrderItem.objects.create(
-                order=order,
-                menuitem=cart_item.menuitem,
-                quantity=cart_item.quantity,
-                price=cart_item.price # Use price from cart at time of order
-            )
-            order_items_list.append(order_item)
+            # Create order items from cart items
+            for item in cart_items:
+                order_item = OrderItem.objects.create(
+                    order=order,
+                    menuitem=item.menuitem,
+                    quantity=item.quantity,
+                    price=item.price,
+                )
+                # --- CRUCIAL STEP: Copy selected options ---
+                order_item.selected_options.set(item.selected_options.all())
 
-        Cart.objects.filter(user=request.user).delete() # Empty the cart after order placed
+            # Clear the cart
+            cart_items.delete()
 
-        serializer = OrderSerializer(order) # Serialize the created Order
+        serializer = OrderSerializer(order, context={'request': request})
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 
