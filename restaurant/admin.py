@@ -1,7 +1,7 @@
 # restaurant/admin.py
 from django.contrib import admin
 from django.utils.html import format_html # Import format_html
-from .models import Cart, Category, MenuItem, Order, OrderItem, UserProfile, OptionGroup, OptionChoice # Import new models
+from .models import Cart, Category, MenuItem, Order, OrderItem, StoreLocation, UserAddress, UserProfile, OptionGroup, OptionChoice # Import new models
 
 # Register your models here.
 
@@ -49,6 +49,22 @@ class OptionGroupAdmin(admin.ModelAdmin):
     list_filter = ('menu_item',)
     search_fields = ('name', 'menu_item__title')
     inlines = [OptionChoiceInline]
+
+@admin.register(StoreLocation)
+class StoreLocationAdmin(admin.ModelAdmin):
+    list_display = ('name', 'address', 'delivery_radius_km', 'is_active')
+    list_filter = ('is_active',)
+    search_fields = ('name', 'address')
+    # Make coordinates read-only as they should be set programmatically or by an admin who knows what they're doing
+    readonly_fields = ('latitude', 'longitude')
+
+@admin.register(UserAddress)
+class UserAddressAdmin(admin.ModelAdmin):
+    list_display = ('nickname', 'user', 'street_address', 'city', 'is_default')
+    list_filter = ('is_default', 'city')
+    search_fields = ('user__username', 'nickname', 'street_address')
+    # Coordinates are set by the system, so they should be read-only
+    readonly_fields = ('latitude', 'longitude')
 
 # Basic registration for other models
 admin.site.register(Cart)
