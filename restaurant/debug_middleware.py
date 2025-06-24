@@ -1,5 +1,3 @@
-# In restaurant/debug_middleware.py
-
 class RequestDebugMiddleware:
     def __init__(self, get_response):
         self.get_response = get_response
@@ -7,7 +5,6 @@ class RequestDebugMiddleware:
     def __call__(self, request):
         # --- Code executed on an incoming request, BEFORE the view is called ---
 
-        # We only care about the activation path
         if 'activation' in request.path:
             print("\n--- DEBUG MIDDLEWARE: INCOMING REQUEST ---")
             print(f"PATH: {request.path}")
