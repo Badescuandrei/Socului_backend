@@ -42,17 +42,6 @@ class UserProfile(models.Model):
             return f"+{self.phone_number}"
         return None
 
-@receiver(post_save, sender=User)
-def create_or_update_user_profile(sender, instance, created, **kwargs):
-    """
-    Automatically create/ensure UserProfile exists when User is saved.
-    """
-    if created:
-        UserProfile.objects.create(user=instance)
-    else:
-        # Ensure profile exists for existing users
-        UserProfile.objects.get_or_create(user=instance)
-
 # Add this for data integrity
 @receiver(post_delete, sender=User)
 def delete_user_profile(sender, instance, **kwargs):
