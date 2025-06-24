@@ -29,6 +29,13 @@ class UserProfile(models.Model):
         ],
         help_text="Enter phone number in international format"
     )
+    store_location = models.ForeignKey(
+        'StoreLocation',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        help_text="The home store for a delivery crew member."
+    )
 
     def __str__(self):
         return f"Profile for {self.user.username} - Phone: {self.phone_number or 'N/A'}"
@@ -123,6 +130,9 @@ class Order(models.Model):
         (2, 'Delivered'),
     ]
 
+    # New unique, human-readable identifier
+    order_code = models.CharField(max_length=12, unique=True, editable=False, db_index=True)
+
     user = models.ForeignKey(
         User,
         on_delete=models.SET_NULL,
@@ -134,27 +144,56 @@ class Order(models.Model):
         on_delete=models.SET_NULL,
         related_name="delivery_crew_orders",
         null=True,
-        blank=True, # Allow no delivery crew assigned initially
+        blank=True,
         limit_choices_to={'groups__name': "Delivery crew"}
     )
-    status = models.SmallIntegerField(choices=STATUS_CHOICES, db_index=True, default=0) # Using choices for status
-    total = models.DecimalField(max_digits=8, decimal_places=2) # Increased max_digits for total
-    date = models.DateField(db_index=True, auto_now_add=True) # auto_now_add for order date
+    status = models.SmallIntegerField(choices=STATUS_CHOICES, db_index=True, default=0)
+    total = models.DecimalField(max_digits=8, decimal_places=2)
+    
+    # Replaced 'date' with a precise timestamp
+    created_at = models.DateTimeField(db_index=True, auto_now_add=True)
+    
     customer_name = models.CharField(max_length=255, blank=True)
     customer_phone = models.CharField(max_length=20, blank=True, db_index=True)
-    delivery_address = models.TextField(blank=True)
+    delivery_address = models.TextField(blank=True) # Will store a snapshot of the address text
     is_voice_order = models.BooleanField(default=False, db_index=True)
 
+    # New links to our new models
+    store_location = models.ForeignKey(
+        'StoreLocation',
+        on_delete=models.PROTECT,
+        related_name='orders',
+        null=True, # Nullable to support old or phone orders
+        blank=True
+    )
+    delivery_address_link = models.ForeignKey(
+        'UserAddress',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True
+    )
+
+    def save(self, *args, **kwargs):
+        """Generate a unique order code on creation."""
+        if not self.order_code:
+            # Generate a code like "SOC-A4E8B1"
+            while True:
+                code = f"SOC-{uuid.uuid4().hex[:6].upper()}"
+                if not Order.objects.filter(order_code=code).exists():
+                    self.order_code = code
+                    break
+        super().save(*args, **kwargs)
+
     def __str__(self):
-        # --- MODIFIED __str__ based on flag ---
         if self.is_voice_order:
             user_identifier = f"{self.customer_name or 'Unknown'} ({self.customer_phone or 'N/A'}) [Voice]"
         elif self.user:
             user_identifier = f"{self.user.username} [App]"
         else:
-             user_identifier = "Unknown/System" # Should ideally not happen if user was mandatory before
-
-        return f"Order #{self.pk} by {user_identifier} on {self.date}"
+             user_identifier = "Unknown/System"
+        
+        # Use the new fields for a more informative string representation
+        return f"Order {self.order_code} by {user_identifier} on {self.created_at.strftime('%Y-%m-%d')}"
 
 class OrderItem(models.Model):
     order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name='order_items') # Added related_name
