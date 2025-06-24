@@ -1,4 +1,5 @@
 from django.db import models
+import uuid
 from django.contrib.auth.models import User
 from django.db.models.signals import post_save, post_delete
 from django.dispatch import receiver
@@ -164,3 +165,40 @@ class OrderItem(models.Model):
 
     def __str__(self):
         return f"OrderItem for Order #{self.order.pk} - MenuItem: {self.menuitem.title}, Quantity: {self.quantity}"
+    
+class StoreLocation(models.Model):
+    name = models.CharField(max_length=255)
+    address = models.TextField()
+    phone_number = models.CharField(max_length=20, blank=True, null=True)
+    latitude = models.DecimalField(max_digits=9, decimal_places=6)
+    longitude = models.DecimalField(max_digits=9, decimal_places=6)
+    delivery_radius_km = models.DecimalField(
+        max_digits=4, 
+        decimal_places=1, 
+        default=5.0,
+        help_text="The delivery radius in kilometers from this location."
+    )
+    is_active = models.BooleanField(
+        default=True, 
+        help_text="Is this location currently accepting online orders?"
+    )
+
+    def __str__(self):
+        return self.name
+    
+class UserAddress(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='addresses')
+    nickname = models.CharField(max_length=100, help_text="e.g., Home, Work")
+    street_address = models.CharField(max_length=255)
+    city = models.CharField(max_length=100)
+    postal_code = models.CharField(max_length=20)
+    latitude = models.DecimalField(max_digits=9, decimal_places=6, blank=True, null=True)
+    longitude = models.DecimalField(max_digits=9, decimal_places=6, blank=True, null=True)
+    is_default = models.BooleanField(default=False)
+
+    def __str__(self):
+        return f"{self.nickname} ({self.street_address}) for {self.user.username}"
+
+    class Meta:
+        # Ensures a user cannot have two addresses with the same nickname
+        unique_together = ('user', 'nickname')
