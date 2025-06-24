@@ -27,7 +27,7 @@ SECRET_KEY = config('SECRET_KEY')
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['127.0.0.1', 'localhost', '10.0.2.2', '192.168.1.103', '192.168.1.146']
+ALLOWED_HOSTS = ['127.0.0.1', 'localhost', '10.0.2.2', '192.168.1.146']
 
 # Media files (User Uploads)
 MEDIA_URL = '/media/' # Base URL for serving media files
@@ -57,6 +57,7 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
+    'restaurant.debug_middleware.RequestDebugMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -161,19 +162,31 @@ REST_FRAMEWORK = {
 DJOSER = {
     'PASSWORD_RESET_CONFIRM_URL': '#/password/reset/confirm/{uid}/{token}', # Frontend URL for password reset confirm
     'USERNAME_RESET_CONFIRM_URL': '#/username/reset/confirm/{uid}/{token}', # Frontend URL for username reset confirm
-    'ACTIVATION_URL': '#/activate/{uid}/{token}', # Frontend URL for account activation (if using email verification)
+    'ACTIVATION_URL': 'https://badescu.design://activate/{uid}/{token}', # Mobile deep link URL for account activation
     'SEND_ACTIVATION_EMAIL': True, 
-    'LOGIN_FIELD': 'email',
+    'EMAIL': {
+        'activation': 'restaurant.email.ActivationEmail',  # Use custom email class
+    },
+    'LOGIN_FIELD': 'email', # Use email for login
      'SERIALIZERS': {
-        'user_create': 'restaurant.serializers.UserCreateSerializer',
+        'user_create': 'restaurant.serializers.UserCreateSerializer', # Use custom user create serializer in order to add the phone number field
         'user': 'djoser.serializers.UserSerializer',
         'current_user': 'djoser.serializers.UserSerializer',
     },
+    'PERMISSIONS': {
+        'activation': ['rest_framework.permissions.AllowAny'],
+        'password_reset': ['rest_framework.permissions.AllowAny'],
+        'password_reset_confirm': ['rest_framework.permissions.AllowAny'],
+        'username_reset': ['rest_framework.permissions.AllowAny'],
+        'username_reset_confirm': ['rest_framework.permissions.AllowAny'],
+        'user_create': ['rest_framework.permissions.AllowAny'],
+    }
 }
 
 SIMPLE_JWT = {
     'ACCESS_TOKEN_LIFETIME': datetime.timedelta(minutes=5),
     'REFRESH_TOKEN_LIFETIME': datetime.timedelta(minutes=5),
+    'UPDATE_LAST_LOGIN': False,
     # 'ROTATE_REFRESH_TOKENS': True,
 }
 
