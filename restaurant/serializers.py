@@ -1,30 +1,55 @@
 from rest_framework import serializers
+from django.db import transaction
 from .models import Category, MenuItem, Cart, Order, OrderItem, OptionGroup, OptionChoice
 from django.contrib.auth.models import User, Group
+from django.contrib.auth import get_user_model
 from djoser.serializers import UserCreateSerializer as BaseUserCreateSerializer
 
+
+# restaurant/serializers.py
+
+User = get_user_model()
+
 class UserCreateSerializer(BaseUserCreateSerializer):
+    phone_number = serializers.CharField(write_only=True)
+
     class Meta(BaseUserCreateSerializer.Meta):
-        phone_number = serializers.CharField(write_only=True)
-        fields = ['id', 'email', 'first_name', 'last_name', 'password']
+        fields = ('id', 'email', 'first_name', 'last_name', 'password', 'phone_number')
 
+    # Your custom validate method is correct and necessary. Do not change it.
+    def validate(self, attrs):
+        phone_number = attrs.pop('phone_number', None)
+        validated_attrs = super().validate(attrs)
+        validated_attrs['phone_number'] = phone_number
+        return validated_attrs
+
+    # We will modify THIS method.
     def create(self, validated_data):
-        # Set the username to be the same as the email
-        validated_data['username'] = validated_data['email']
+        # Your atomic transaction is excellent practice. Keep it.
+        with transaction.atomic():
+            # Use Django's secure `create_user` manager method.
+            user = User.objects.create_user(
+                username=validated_data['email'],
+                email=validated_data['email'],
+                password=validated_data['password'],
+                first_name=validated_data.get('first_name', ''),
+                last_name=validated_data.get('last_name', ''),
+                
+                # --- THIS IS THE CRITICAL FIX ---
+                # Explicitly create the user as inactive.
+                # Djoser's activation endpoint will set this to True.
+                is_active=False
+            )
 
-        # Extract the phone_number from the validated data
-        phone_number = validated_data.pop('phone_number', None)
-
-        # Let the parent Djoser serializer create the user first
-        user = super().create(validated_data)
-
-        # Now that the user is created, the post_save signal in your models.py 
-        # has already created the associated UserProfile.
-        # We can now update it with the phone number.
-        if phone_number:
-            user.userprofile.phone_number = phone_number
-            user.userprofile.save()
-
+            # Your UserProfile logic is correct. Keep it.
+            # Your post_save signal should have already created the profile.
+            if hasattr(user, 'userprofile'):
+                user.userprofile.phone_number = validated_data.get('phone_number')
+                user.userprofile.save()
+            else:
+                # This is a good fallback/log for debugging.
+                print(f"!!! CRITICAL: UserProfile not found for {user.email} immediately after creation.")
+            
         return user
 
 class CategorySerializer(serializers.ModelSerializer):
